@@ -55,7 +55,7 @@ export default function App() {
           const signChainId = wallet.isGalileo
             ? OG_GALILEO_CHAIN.chainId
             : (wallet.chainId ?? OG_GALILEO_CHAIN.chainId);
-          const signature = await signAttestRequest(
+          const { signature, address: signerAddress } = await signAttestRequest(
             {
               thesis,
               symbol,
@@ -69,7 +69,7 @@ export default function App() {
           const response = await generateSignal({
             thesis,
             symbol,
-            walletAddress: wallet.address,
+            walletAddress: signerAddress,
             issuedAt,
             signature,
           });

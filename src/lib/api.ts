@@ -12,6 +12,35 @@ export interface HealthResponse {
   requireWalletForMint: boolean;
 }
 
+interface SignalJobResponse {
+  status: "pending" | "complete" | "error";
+  error?: string;
+  result?: GenerateSignalResponse;
+}
+
+function debugLog(
+  location: string,
+  message: string,
+  data: Record<string, unknown>,
+  hypothesisId: string,
+): void {
+  // #region agent log
+  fetch("http://127.0.0.1:7673/ingest/9b6e0f60-6b41-494f-b3f7-f5fa33dde9ce", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "a08580" },
+    body: JSON.stringify({
+      sessionId: "a08580",
+      runId: "generate-fix",
+      hypothesisId,
+      location,
+      message,
+      data,
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
+}
+
 async function readApiJson<T>(res: Response): Promise<T> {
   const contentType = res.headers.get("content-type") ?? "";
   const text = await res.text();
@@ -24,7 +53,7 @@ async function readApiJson<T>(res: Response): Promise<T> {
     (!contentType.includes("json") && trimmed.startsWith("<"))
   ) {
     throw new Error(
-      "API returned a web page instead of JSON. Open attestra-0g.netlify.app, hard-refresh, and try again.",
+      "API returned a web page instead of JSON. Hard-refresh this site and try again.",
     );
   }
 
@@ -50,6 +79,42 @@ async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
   });
 }
 
+async function pollSignalJob(jobId: string): Promise<GenerateSignalResponse> {
+  const deadline = Date.now() + 180_000;
+  let polls = 0;
+
+  while (Date.now() < deadline) {
+    polls += 1;
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+
+    const res = await apiFetch(`/signals/jobs/${encodeURIComponent(jobId)}`);
+    const job = await readApiJson<SignalJobResponse>(res);
+
+    debugLog(
+      "api.ts:pollSignalJob",
+      "job poll",
+      { jobId, polls, httpStatus: res.status, jobStatus: job.status, error: job.error ?? null },
+      "H6",
+    );
+
+    if (!res.ok) {
+      throw new Error(job.error ?? `Job lookup failed (${res.status})`);
+    }
+
+    if (job.status === "complete" && job.result) {
+      return job.result;
+    }
+
+    if (job.status === "error") {
+      throw new Error(job.error ?? "Signal generation failed");
+    }
+  }
+
+  throw new Error(
+    "Attestation is still running on 0G (storage + chain). Wait a moment and check your wallet — then try again.",
+  );
+}
+
 export async function fetchHealth(): Promise<HealthResponse> {
   const res = await apiFetch("/health");
   if (!res.ok) throw new Error("API unreachable");
@@ -67,9 +132,11 @@ export interface GenerateSignalParams {
 export async function generateSignal(
   params: GenerateSignalParams,
 ): Promise<GenerateSignalResponse> {
+  const jobId = crypto.randomUUID();
   const body: GenerateSignalRequest = {
     thesis: params.thesis,
     symbol: params.symbol,
+    jobId,
   };
 
   if (params.walletAddress && params.issuedAt !== undefined && params.signature) {
@@ -84,8 +151,25 @@ export async function generateSignal(
     body: JSON.stringify(body),
   });
 
+  debugLog(
+    "api.ts:generateSignal",
+    "generate response",
+    {
+      jobId,
+      httpStatus: res.status,
+      apiBase: API_BASE,
+    },
+    "H6-H7",
+  );
+
+  if (res.status === 202) {
+    return pollSignalJob(jobId);
+  }
+
   const data = await readApiJson<{ error?: string } & GenerateSignalResponse>(res);
-  if (!res.ok) throw new Error(data.error ?? "Signal generation failed");
+  if (!res.ok) {
+    throw new Error(data.error ?? `Signal generation failed (${res.status})`);
+  }
   return data;
 }
 

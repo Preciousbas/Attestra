@@ -129,7 +129,7 @@ export async function signAttestRequest(
   payload: AttestRequestPayload,
   chainId: number,
   walletId?: string,
-): Promise<string> {
+): Promise<{ signature: string; address: string }> {
   const injected = await ensureActiveWallet(walletId);
   const active = getActiveWallet();
   debugLog(
@@ -198,7 +198,7 @@ export async function signAttestRequest(
   try {
     const sig = await signTypedDataV4(injected, signerAddress, typed.domain, typed.types, signMessage);
     debugLog("wallet.ts:signAttestRequest:success", "v4 signed", { method: "v4" }, "H1", "post-fix");
-    return sig;
+    return { signature: sig, address: signerAddress };
   } catch (error) {
     v4Error = error;
     const details = errorDetails(error);
@@ -213,7 +213,7 @@ export async function signAttestRequest(
   try {
     const sig = await signer.signTypedData(typed.domain, typed.types, signMessage);
     debugLog("wallet.ts:signAttestRequest:success", "ethers signed", { method: "ethers" }, "H5", "post-fix");
-    return sig;
+    return { signature: sig, address: signerAddress };
   } catch (ethersError) {
     const details = errorDetails(ethersError);
     debugLog(

@@ -7,6 +7,11 @@
   VITE_API_URL = "/api"
 
 [[redirects]]
+  from = "/api/signals/generate"
+  to = "/.netlify/functions/signals-generate-background"
+  status = 200
+
+[[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/api"
   status = 200
@@ -22,3 +27,6 @@
 
 [functions.api]
   timeout = 26
+
+[functions."signals-generate-background"]
+  timeout = 300

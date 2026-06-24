@@ -1,8 +1,5 @@
 import type { Config, Context } from "@netlify/functions";
 import { config as appConfig } from "../../server/config.ts";
-import { assertComputeConfigured } from "../../server/config.ts";
-import { parseGenerateBody, resolveMintRecipient } from "../../server/services/generate-request.ts";
-import { generateSignal } from "../../server/services/signal.ts";
 import { fetchMarketSnapshot } from "../../server/services/market.ts";
 import { getProofByTxHash, getSignalById } from "../../server/services/chain.ts";
 import {
@@ -11,7 +8,7 @@ import {
   isAgenticConfigured,
 } from "../../server/services/agentic-id.ts";
 import { verifyStorageAgainstHash } from "../../server/services/verify.ts";
-import type { GenerateSignalRequest, OnChainProof } from "../../shared/types.ts";
+import type { OnChainProof } from "../../shared/types.ts";
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -74,20 +71,14 @@ export default async (req: Request, _context: Context): Promise<Response> => {
       return json(snapshot);
     }
 
-    if (path === "/signals/generate" && req.method === "POST") {
-      const body = (await req.json()) as GenerateSignalRequest;
-      const { thesis, symbol } = parseGenerateBody(body);
-
-      if (thesis.length < 12) {
-        return json({ error: "Thesis must be at least 12 characters." }, 400);
+    const jobMatch = path.match(/^\/signals\/jobs\/([^/]+)$/);
+    if (jobMatch && req.method === "GET") {
+      const { readSignalJob } = await import("./_shared/signal-jobs.ts");
+      const job = await readSignalJob(jobMatch[1]);
+      if (!job) {
+        return json({ error: "Job not found" }, 404);
       }
-
-      assertComputeConfigured();
-      const mint = resolveMintRecipient(body, { thesis, symbol });
-      const result = await generateSignal(thesis, symbol ?? appConfig.defaultSymbol, {
-        ownerAddress: mint.ownerAddress,
-      });
-      return json(result);
+      return json(job);
     }
 
     const proofTxMatch = path.match(/^\/proof\/tx\/([^/]+)$/);
@@ -117,6 +108,7 @@ export default async (req: Request, _context: Context): Promise<Response> => {
     else if (
       message.includes("must be") ||
       message.includes("Invalid") ||
+      message.includes("Unsupported") ||
       message.includes("at least")
     ) {
       status = 400;

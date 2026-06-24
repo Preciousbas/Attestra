@@ -53,6 +53,8 @@ export interface GenerateSignalRequest {
   issuedAt?: number;
   /** EIP-712 signature authorizing mint to walletAddress */
   signature?: string;
+  /** Client-generated id for async Netlify background jobs */
+  jobId?: string;
 }
 
 export type InferenceMode = "live" | "mock";
