@@ -7,7 +7,6 @@ import {
 import {
   clearActiveWallet,
   ensureActiveWallet,
-  getActiveWallet,
   getActiveWalletProvider,
   requestWalletAccounts,
   setManualDisconnect,
@@ -25,37 +24,7 @@ declare global {
   }
 }
 
-function debugLog(
-  location: string,
-  message: string,
-  data: Record<string, unknown>,
-  hypothesisId: string,
-  runId = "pre-fix",
-): void {
-  // #region agent log
-  fetch("http://127.0.0.1:7673/ingest/9b6e0f60-6b41-494f-b3f7-f5fa33dde9ce", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "a08580" },
-    body: JSON.stringify({
-      sessionId: "a08580",
-      runId,
-      hypothesisId,
-      location,
-      message,
-      data,
-      timestamp: Date.now(),
-    }),
-  }).catch(() => {});
-  // #endregion
-}
-
-function errorDetails(error: unknown): { code?: number; message: string } {
-  const err = error as { code?: number; message?: string; info?: { error?: { code?: number; message?: string } } };
-  return {
-    code: err.code ?? err.info?.error?.code,
-    message: err.message ?? err.info?.error?.message ?? String(error),
-  };
-}
+export { WalletError } from "./wallet-ui.ts";
 
 function getBrowserProvider(): BrowserProvider {
   const injected = getActiveWalletProvider();
@@ -131,47 +100,15 @@ export async function signAttestRequest(
   walletId?: string,
 ): Promise<{ signature: string; address: string }> {
   const injected = await ensureActiveWallet(walletId);
-  const active = getActiveWallet();
-  debugLog(
-    "wallet.ts:signAttestRequest:entry",
-    "sign start",
-    {
-      walletId: walletId ?? null,
-      activeWalletId: active?.id ?? null,
-      activeWalletName: active?.name ?? null,
-      hasProvider: Boolean(injected),
-      recipient: payload.recipient,
-      signChainId: chainId,
-    },
-    "H2-H3",
-  );
-
   if (!injected) {
     throw new WalletError(
-      "Choose your wallet again (Connect wallet), then retry.",
+      "Choose your wallet in the connect modal, then try again.",
       "NO_WALLET",
     );
   }
 
   const accounts = await requestWalletAccounts(injected);
-  const signerAddress = accounts[0].toLowerCase();
-  debugLog(
-    "wallet.ts:signAttestRequest:accounts",
-    "accounts authorized",
-    {
-      signerAddress,
-      recipient: payload.recipient.toLowerCase(),
-      match: signerAddress === payload.recipient.toLowerCase(),
-    },
-    "H4",
-  );
-
-  if (signerAddress !== payload.recipient.toLowerCase()) {
-    throw new WalletError(
-      "Your wallet account changed. Disconnect and connect again.",
-      "ACCOUNT_MISMATCH",
-    );
-  }
+  const signerAddress = accounts[0];
 
   const provider = new BrowserProvider(injected as Eip1193Provider);
   const network = await provider.getNetwork();
@@ -184,45 +121,39 @@ export async function signAttestRequest(
     );
   }
 
-  const typed = buildAttestTypedData(chainId, payload);
-  const signMessage = {
+  const typed = buildAttestTypedData(chainId, {
+    ...payload,
+    recipient: signerAddress,
+  });
+
+  const typedMessage = {
     thesis: payload.thesis,
     symbol: payload.symbol,
-    recipient: payload.recipient,
-    issuedAt: payload.issuedAt,
+    recipient: signerAddress,
+    issuedAt: BigInt(payload.issuedAt),
   };
 
   const signer = await provider.getSigner(signerAddress);
 
-  let v4Error: unknown;
+  let primaryError: unknown;
   try {
-    const sig = await signTypedDataV4(injected, signerAddress, typed.domain, typed.types, signMessage);
-    debugLog("wallet.ts:signAttestRequest:success", "v4 signed", { method: "v4" }, "H1", "post-fix");
-    return { signature: sig, address: signerAddress };
+    const signature = await signer.signTypedData(typed.domain, typed.types, typedMessage);
+    return { signature, address: signerAddress };
   } catch (error) {
-    v4Error = error;
-    const details = errorDetails(error);
-    debugLog(
-      "wallet.ts:signAttestRequest:v4-fail",
-      "v4 failed",
-      { code: details.code, message: details.message },
-      "H1",
-    );
+    primaryError = error;
   }
 
   try {
-    const sig = await signer.signTypedData(typed.domain, typed.types, signMessage);
-    debugLog("wallet.ts:signAttestRequest:success", "ethers signed", { method: "ethers" }, "H5", "post-fix");
-    return { signature: sig, address: signerAddress };
-  } catch (ethersError) {
-    const details = errorDetails(ethersError);
-    debugLog(
-      "wallet.ts:signAttestRequest:ethers-fail",
-      "ethers failed",
-      { code: details.code, message: details.message },
-      "H5",
+    const signature = await signTypedDataV4(
+      injected,
+      signerAddress,
+      typed.domain,
+      typed.types,
+      payload,
     );
-    throw mapSignError(v4Error, ethersError);
+    return { signature, address: signerAddress };
+  } catch (fallbackError) {
+    throw mapSignError(primaryError, fallbackError);
   }
 }
 
@@ -231,12 +162,7 @@ async function signTypedDataV4(
   address: string,
   domain: ReturnType<typeof buildAttestTypedData>["domain"],
   types: ReturnType<typeof buildAttestTypedData>["types"],
-  message: {
-    thesis: string;
-    symbol: string;
-    recipient: string;
-    issuedAt: number;
-  },
+  message: AttestRequestPayload,
 ): Promise<string> {
   const data = {
     types: {
@@ -254,7 +180,9 @@ async function signTypedDataV4(
       chainId: domain.chainId,
     },
     message: {
-      ...message,
+      thesis: message.thesis,
+      symbol: message.symbol,
+      recipient: message.recipient,
       issuedAt: String(message.issuedAt),
     },
   };
@@ -272,7 +200,7 @@ function mapSignError(...errors: unknown[]): WalletError {
   }
 
   return new WalletError(
-    "Could not sign in your wallet. Pick MetaMask in the wallet list, switch to 0G Galileo, and try again.",
+    "Could not sign in your wallet. Reconnect, pick the same wallet you used at connect, and confirm on 0G Galileo.",
     "SIGN_FAILED",
   );
 }
@@ -284,22 +212,17 @@ function mapSingleSignError(error: unknown): WalletError | null {
   const code = err.code ?? err.info?.error?.code;
   const rawMessage = err.message?.trim() ?? "";
 
-  if (code === 4001 || code === 4100 || String(code) === "ACTION_REJECTED") {
-    if (code === 4100) {
-      return new WalletError(
-        "Your wallet blocked the signature. In Brave, pick MetaMask in the wallet list (not Browser wallet). In brave://settings/web3 set Default wallet to Extensions, then reconnect.",
-        "SIGN_UNAUTHORIZED",
-      );
-    }
+  if (code === 4001 || String(code) === "ACTION_REJECTED") {
     return new WalletError("You declined the signature in your wallet.", "SIGN_REJECTED");
   }
 
   if (
+    code === 4100 ||
     rawMessage.includes("not been authorized") ||
     rawMessage.includes("not authorized")
   ) {
     return new WalletError(
-      "Your wallet blocked the signature. Reconnect using the same wallet you picked in the connect modal, then try again.",
+      "Your wallet blocked the signature. Disconnect, connect again, and pick the same wallet from the list.",
       "SIGN_UNAUTHORIZED",
     );
   }
@@ -314,7 +237,7 @@ function mapSingleSignError(error: unknown): WalletError | null {
 
   if (rawMessage.includes("not supported") || rawMessage.includes("Unsupported")) {
     return new WalletError(
-      "This wallet does not support typed signatures. Connect with MetaMask instead.",
+      "This wallet does not support typed signatures. Try MetaMask or Rabby.",
       "SIGN_UNSUPPORTED",
     );
   }

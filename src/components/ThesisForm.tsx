@@ -80,7 +80,7 @@ export function ThesisForm({
             {signing
               ? "Awaiting wallet signature…"
               : loading
-                ? "Attesting on 0G…"
+                ? "Attesting on 0G… (2–3 min)"
                 : "Generate attested signal"}
           </button>
         </div>

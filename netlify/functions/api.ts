@@ -1,8 +1,5 @@
-import type { Config, Context } from "@netlify/functions";
+import type { Config } from "@netlify/functions";
 import { config as appConfig } from "../../server/config.ts";
-import { assertComputeConfigured } from "../../server/config.ts";
-import { parseGenerateBody, resolveMintRecipient } from "../../server/services/generate-request.ts";
-import { generateSignal } from "../../server/services/signal.ts";
 import { fetchMarketSnapshot } from "../../server/services/market.ts";
 import { getProofByTxHash, getSignalById } from "../../server/services/chain.ts";
 import {
@@ -11,7 +8,7 @@ import {
   isAgenticConfigured,
 } from "../../server/services/agentic-id.ts";
 import { verifyStorageAgainstHash } from "../../server/services/verify.ts";
-import type { GenerateSignalRequest, OnChainProof } from "../../shared/types.ts";
+import type { OnChainProof } from "../../shared/types.ts";
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -51,7 +48,7 @@ function apiPath(url: URL): string {
   return url.pathname.replace(/^\/api/, "") || "/";
 }
 
-export default async (req: Request, context: Context): Promise<Response> => {
+export default async (req: Request): Promise<Response> => {
   const url = new URL(req.url);
   const path = apiPath(url);
 
@@ -82,39 +79,6 @@ export default async (req: Request, context: Context): Promise<Response> => {
         return json({ error: "Job not found" }, 404);
       }
       return json(job);
-    }
-
-    if (path === "/signals/generate" && req.method === "POST") {
-      const body = (await req.json()) as GenerateSignalRequest & { jobId?: string };
-      const jobId =
-        typeof body.jobId === "string" && body.jobId.length > 8 ? body.jobId : crypto.randomUUID();
-
-      const { readSignalJob, writeSignalJob, executeGenerateJob } = await import(
-        "./_shared/signal-jobs.ts"
-      );
-      const existing = await readSignalJob(jobId);
-      if (existing?.status === "pending") {
-        return json({ jobId, status: "pending" }, 202);
-      }
-
-      const startedAt = Date.now();
-      await writeSignalJob(jobId, { status: "pending", startedAt });
-
-      context.waitUntil(
-        executeGenerateJob(jobId, startedAt, async () => {
-          const { thesis, symbol } = parseGenerateBody(body);
-          if (thesis.length < 12) {
-            throw new Error("Thesis must be at least 12 characters.");
-          }
-          assertComputeConfigured();
-          const mint = resolveMintRecipient(body, { thesis, symbol });
-          return generateSignal(thesis, symbol ?? appConfig.defaultSymbol, {
-            ownerAddress: mint.ownerAddress,
-          });
-        }),
-      );
-
-      return json({ jobId, status: "pending" }, 202);
     }
 
     const proofTxMatch = path.match(/^\/proof\/tx\/([^/]+)$/);

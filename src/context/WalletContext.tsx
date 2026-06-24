@@ -37,6 +37,7 @@ interface WalletContextValue {
   disconnect: () => Promise<void>;
   switchNetwork: () => Promise<void>;
   clearError: () => void;
+  syncAddress: (address: string) => void;
   shorten: (address: string) => string;
 }
 
@@ -208,6 +209,10 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const syncAddress = useCallback((next: string) => {
+    setAddress(next);
+  }, []);
+
   const value = useMemo<WalletContextValue>(
     () => ({
       address,
@@ -224,6 +229,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       disconnect,
       switchNetwork,
       clearError: () => setError(null),
+      syncAddress,
       shorten: shortenAddress,
     }),
     [
@@ -238,6 +244,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       connect,
       disconnect,
       switchNetwork,
+      syncAddress,
     ],
   );
 

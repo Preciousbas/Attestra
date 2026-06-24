@@ -65,7 +65,9 @@ export default function App() {
             signChainId,
             wallet.selectedWalletId || undefined,
           );
+          wallet.syncAddress(signerAddress);
 
+          setSigning(false);
           const response = await generateSignal({
             thesis,
             symbol,

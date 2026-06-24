@@ -6,6 +6,12 @@
 [build.environment]
   VITE_API_URL = "/api"
 
+# Long-running attestation (2–3 min) runs in background function (15 min limit).
+[[redirects]]
+  from = "/api/signals/generate"
+  to = "/.netlify/functions/signals-generate-background"
+  status = 200
+
 [[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/api"
@@ -21,4 +27,4 @@
   external_node_modules = ["@0gfoundation/0g-ts-sdk", "ethers"]
 
 [functions.api]
-  timeout = 60
+  timeout = 26
