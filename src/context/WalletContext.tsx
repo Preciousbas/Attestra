@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -15,7 +16,9 @@ import {
   ensureActiveWallet,
   getActiveWalletProvider,
   hasWalletProvider,
+  isManualDisconnect,
   setActiveWalletById,
+  setManualDisconnect,
   shortenAddress,
 } from "../lib/wallet-ui.ts";
 
@@ -43,29 +46,6 @@ function loadWallet() {
   return import("../lib/wallet.ts");
 }
 
-function attachProviderListeners(
-  provider: NonNullable<ReturnType<typeof getActiveWalletProvider>>,
-  onAddress: (address: string | null) => void,
-  onChain: (chainId: number) => void,
-): () => void {
-  if (!provider.on) return () => {};
-
-  const onAccounts = (accounts: unknown) => {
-    const list = accounts as string[];
-    onAddress(list[0] ?? null);
-  };
-  const onChainChanged = (hexChainId: unknown) => {
-    onChain(Number.parseInt(String(hexChainId), 16));
-  };
-
-  provider.on("accountsChanged", onAccounts);
-  provider.on("chainChanged", onChainChanged);
-  return () => {
-    provider.removeListener?.("accountsChanged", onAccounts);
-    provider.removeListener?.("chainChanged", onChainChanged);
-  };
-}
-
 export function WalletProvider({ children }: { children: ReactNode }) {
   const [address, setAddress] = useState<string | null>(null);
   const [chainId, setChainId] = useState<number | null>(null);
@@ -75,22 +55,59 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [wallets, setWallets] = useState<DiscoveredWallet[]>([]);
   const [selectedWalletId, setSelectedWalletId] = useState("");
   const [hasProvider, setHasProvider] = useState(() => hasWalletProvider());
+  const sessionAllowedRef = useRef(true);
 
-  const refreshSilent = useCallback(async () => {
+  const allowSession = useCallback(() => {
+    return sessionAllowedRef.current && !isManualDisconnect();
+  }, []);
+
+  const attachProviderListeners = useCallback(
+    (
+      provider: NonNullable<ReturnType<typeof getActiveWalletProvider>>,
+      onAddress: (address: string | null) => void,
+      onChain: (chainId: number) => void,
+    ): (() => void) => {
+      if (!provider.on) return () => {};
+
+      const onAccounts = (accounts: unknown) => {
+        if (!allowSession()) return;
+        const list = accounts as string[];
+        onAddress(list[0] ?? null);
+      };
+      const onChainChanged = (hexChainId: unknown) => {
+        if (!allowSession()) return;
+        onChain(Number.parseInt(String(hexChainId), 16));
+      };
+
+      provider.on("accountsChanged", onAccounts);
+      provider.on("chainChanged", onChainChanged);
+      return () => {
+        provider.removeListener?.("accountsChanged", onAccounts);
+        provider.removeListener?.("chainChanged", onChainChanged);
+      };
+    },
+    [allowSession],
+  );
+
+  const refreshWalletList = useCallback(async () => {
     const list = await discoverWallets();
     setWallets(list);
     setHasProvider(list.length > 0);
 
-    if (list.length > 0 && !selectedWalletId) {
-      const preferred =
-        list.find((w) => w.name === "MetaMask") ??
-        list.find((w) => w.name === "Rabby Wallet") ??
-        list[0];
-      if (preferred) {
-        setSelectedWalletId(preferred.id);
-        setActiveWalletById(preferred.id);
-      }
+    if (list.length === 1 && !selectedWalletId) {
+      setSelectedWalletId(list[0].id);
+      setActiveWalletById(list[0].id);
     }
+  }, [selectedWalletId]);
+
+  const refreshSession = useCallback(async () => {
+    if (!allowSession()) {
+      setAddress(null);
+      setChainId(null);
+      return;
+    }
+
+    await refreshWalletList();
 
     const provider = await ensureActiveWallet(selectedWalletId || undefined);
     if (!provider) return;
@@ -99,25 +116,13 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     const [addr, cid] = await Promise.all([readConnectedAddress(), readWalletChainId()]);
     setAddress(addr);
     setChainId(cid);
-  }, [selectedWalletId]);
+  }, [allowSession, refreshWalletList, selectedWalletId]);
 
   useEffect(() => {
     let cleanup: (() => void) | undefined;
 
-    void discoverWallets().then((list) => {
-      setWallets(list);
-      setHasProvider(list.length > 0);
-
-      if (list.length > 0) {
-        const preferred =
-          list.find((w) => w.name === "MetaMask") ??
-          list.find((w) => w.name === "Rabby Wallet") ??
-          list[0];
-        if (preferred) {
-          setSelectedWalletId((current) => current || preferred.id);
-          setActiveWalletById(preferred.id);
-        }
-      }
+    void refreshWalletList().then(() => {
+      if (!allowSession()) return;
 
       const provider = getActiveWalletProvider();
       if (provider) {
@@ -125,26 +130,30 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       }
     });
 
-    void refreshSilent();
+    void refreshSession();
 
     return () => cleanup?.();
-  }, [refreshSilent]);
+  }, [attachProviderListeners, allowSession, refreshSession, refreshWalletList]);
 
   useEffect(() => {
     if (!selectedWalletId) return;
     setActiveWalletById(selectedWalletId);
+
     const provider = getActiveWalletProvider();
     if (!provider) return;
 
     const cleanup = attachProviderListeners(provider, setAddress, setChainId);
-    void refreshSilent();
+    void refreshSession();
     return cleanup;
-  }, [selectedWalletId, refreshSilent]);
+  }, [attachProviderListeners, refreshSession, selectedWalletId]);
 
   const connect = useCallback(async (walletId?: string) => {
     const id = walletId ?? selectedWalletId;
     setConnecting(true);
     setError(null);
+    sessionAllowedRef.current = true;
+    setManualDisconnect(false);
+
     try {
       if (!id) {
         throw new WalletError("Choose a wallet first", "NO_WALLET_SELECTED");
@@ -172,11 +181,13 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const disconnect = useCallback(async () => {
     setDisconnecting(true);
     setError(null);
+    sessionAllowedRef.current = false;
+
     try {
       const { disconnectWallet } = await loadWallet();
       await disconnectWallet();
     } catch {
-      // Local state reset is enough if revoke is unsupported.
+      setManualDisconnect(true);
     } finally {
       setAddress(null);
       setChainId(null);

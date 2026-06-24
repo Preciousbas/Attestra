@@ -12,10 +12,48 @@ export interface HealthResponse {
   requireWalletForMint: boolean;
 }
 
+async function readApiJson<T>(res: Response): Promise<T> {
+  const contentType = res.headers.get("content-type") ?? "";
+  const text = await res.text();
+  const trimmed = text.trimStart();
+
+  if (
+    trimmed.startsWith("<!") ||
+    trimmed.startsWith("<html") ||
+    trimmed.startsWith("<HTML") ||
+    (!contentType.includes("json") && trimmed.startsWith("<"))
+  ) {
+    throw new Error(
+      "API returned a web page instead of JSON. Open attestra-0g.netlify.app, hard-refresh, and try again.",
+    );
+  }
+
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    const snippet = text.slice(0, 120).replace(/\s+/g, " ");
+    throw new Error(
+      snippet.length > 0
+        ? `API returned an invalid response: ${snippet}`
+        : "API returned an empty response.",
+    );
+  }
+}
+
+async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
+  return fetch(`${API_BASE}${path}`, {
+    ...init,
+    headers: {
+      Accept: "application/json",
+      ...(init?.headers ?? {}),
+    },
+  });
+}
+
 export async function fetchHealth(): Promise<HealthResponse> {
-  const res = await fetch(`${API_BASE}/health`);
+  const res = await apiFetch("/health");
   if (!res.ok) throw new Error("API unreachable");
-  return res.json();
+  return readApiJson<HealthResponse>(res);
 }
 
 export interface GenerateSignalParams {
@@ -40,27 +78,27 @@ export async function generateSignal(
     body.signature = params.signature;
   }
 
-  const res = await fetch(`${API_BASE}/signals/generate`, {
+  const res = await apiFetch("/signals/generate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
 
-  const data = await res.json();
+  const data = await readApiJson<{ error?: string } & GenerateSignalResponse>(res);
   if (!res.ok) throw new Error(data.error ?? "Signal generation failed");
   return data;
 }
 
 export async function fetchProofByTxHash(txHash: string): Promise<OnChainProof> {
-  const res = await fetch(`${API_BASE}/proof/tx/${encodeURIComponent(txHash)}`);
-  const data = await res.json();
+  const res = await apiFetch(`/proof/tx/${encodeURIComponent(txHash)}`);
+  const data = await readApiJson<{ error?: string } & OnChainProof>(res);
   if (!res.ok) throw new Error(data.error ?? "Proof lookup failed");
   return data;
 }
 
 export async function fetchProofBySignalId(signalId: string): Promise<OnChainProof> {
-  const res = await fetch(`${API_BASE}/proof/signal/${encodeURIComponent(signalId)}`);
-  const data = await res.json();
+  const res = await apiFetch(`/proof/signal/${encodeURIComponent(signalId)}`);
+  const data = await readApiJson<{ error?: string } & OnChainProof>(res);
   if (!res.ok) throw new Error(data.error ?? "Proof lookup failed");
   return data;
 }

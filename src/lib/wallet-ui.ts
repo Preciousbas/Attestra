@@ -36,6 +36,19 @@ export interface DiscoveredWallet {
 let cachedWallets: DiscoveredWallet[] | null = null;
 let activeWallet: DiscoveredWallet | null = null;
 let discoveryPromise: Promise<DiscoveredWallet[]> | null = null;
+let manualDisconnect = false;
+
+export function isManualDisconnect(): boolean {
+  return manualDisconnect;
+}
+
+export function setManualDisconnect(value: boolean): void {
+  manualDisconnect = value;
+}
+
+export function clearActiveWallet(): void {
+  activeWallet = null;
+}
 
 function labelLegacyProvider(provider: RequestableProvider): string {
   if (provider.isMetaMask) return "MetaMask";
@@ -45,12 +58,16 @@ function labelLegacyProvider(provider: RequestableProvider): string {
   return "Browser wallet";
 }
 
-function preferDefaultWallet(wallets: DiscoveredWallet[]): DiscoveredWallet | undefined {
-  return (
-    wallets.find((w) => w.name === "MetaMask") ??
-    wallets.find((w) => w.name === "Rabby Wallet") ??
-    wallets[0]
-  );
+function sortWalletsByPreference(wallets: DiscoveredWallet[]): DiscoveredWallet[] {
+  const rank = (name: string): number => {
+    if (name === "MetaMask") return 0;
+    if (name === "Rabby Wallet") return 1;
+    if (name === "Brave Wallet") return 2;
+    if (name === "Coinbase Wallet") return 3;
+    if (name === "Trust Wallet") return 99;
+    return 50;
+  };
+  return [...wallets].sort((a, b) => rank(a.name) - rank(b.name));
 }
 
 /**
@@ -99,10 +116,10 @@ export function discoverWallets(): Promise<DiscoveredWallet[]> {
         add(eth, labelLegacyProvider(eth), "legacy-injected");
       }
 
-      cachedWallets = wallets;
+      cachedWallets = sortWalletsByPreference(wallets);
       discoveryPromise = null;
 
-      if (!activeWallet && wallets.length === 1) {
+      if (!activeWallet && wallets.length === 1 && !manualDisconnect) {
         activeWallet = wallets[0];
       }
 
@@ -141,6 +158,10 @@ export async function ensureActiveWallet(walletId?: string): Promise<Requestable
     return picked?.provider;
   }
 
+  if (manualDisconnect) {
+    return undefined;
+  }
+
   if (activeWallet) return activeWallet.provider;
 
   if (wallets.length === 1) {
@@ -148,14 +169,7 @@ export async function ensureActiveWallet(walletId?: string): Promise<Requestable
     return wallets[0].provider;
   }
 
-  if (wallets.length > 1) {
-    const preferred = preferDefaultWallet(wallets);
-    if (preferred) {
-      activeWallet = preferred;
-      return preferred.provider;
-    }
-  }
-
+  // Multiple wallets: do not auto-pick — user must choose in the connect modal.
   return undefined;
 }
 

@@ -5,9 +5,11 @@ import {
   type AttestRequestPayload,
 } from "../../shared/wallet-auth.ts";
 import {
+  clearActiveWallet,
   ensureActiveWallet,
   getActiveWalletProvider,
   requestWalletAccounts,
+  setManualDisconnect,
   WalletError,
 } from "./wallet-ui.ts";
 
@@ -33,6 +35,8 @@ function getBrowserProvider(): BrowserProvider {
 }
 
 export async function connectWallet(walletId?: string): Promise<{ address: string; chainId: number }> {
+  setManualDisconnect(false);
+
   const injected = await ensureActiveWallet(walletId);
   if (!injected) {
     throw new WalletError("No wallet found", "NO_WALLET");
@@ -128,14 +132,17 @@ export async function signAttestRequest(
     issuedAt: payload.issuedAt,
   };
 
+  let v4Error: unknown;
+  try {
+    return await signTypedDataV4(injected, signerAddress, typed.domain, typed.types, signMessage);
+  } catch (error) {
+    v4Error = error;
+  }
+
   try {
     return await signer.signTypedData(typed.domain, typed.types, signMessage);
-  } catch (primaryError) {
-    try {
-      return await signTypedDataV4(injected, signerAddress, typed.domain, typed.types, signMessage);
-    } catch {
-      throw mapSignError(primaryError);
-    }
+  } catch (ethersError) {
+    throw mapSignError(v4Error, ethersError);
   }
 }
 
@@ -178,7 +185,21 @@ async function signTypedDataV4(
   })) as string;
 }
 
-function mapSignError(error: unknown): WalletError {
+function mapSignError(...errors: unknown[]): WalletError {
+  for (const error of errors) {
+    const mapped = mapSingleSignError(error);
+    if (mapped) return mapped;
+  }
+
+  return new WalletError(
+    "Could not sign in your wallet. Pick MetaMask in the wallet list, switch to 0G Galileo, and try again.",
+    "SIGN_FAILED",
+  );
+}
+
+function mapSingleSignError(error: unknown): WalletError | null {
+  if (!error) return null;
+
   const err = error as { code?: number; message?: string; info?: { error?: { code?: number } } };
   const code = err.code ?? err.info?.error?.code;
   const rawMessage = err.message?.trim() ?? "";
@@ -195,28 +216,36 @@ function mapSignError(error: unknown): WalletError {
     return new WalletError("You declined the signature in your wallet.", "SIGN_REJECTED");
   }
 
-  if (rawMessage.length > 0 && rawMessage.length < 160) {
+  if (rawMessage.includes("not supported") || rawMessage.includes("Unsupported")) {
+    return new WalletError(
+      "This wallet does not support typed signatures. Connect with MetaMask instead.",
+      "SIGN_UNSUPPORTED",
+    );
+  }
+
+  if (rawMessage.length > 0 && rawMessage.length < 200) {
     return new WalletError(rawMessage, "SIGN_FAILED");
   }
 
-  return new WalletError(
-    "Could not sign in your wallet. Try again or use a different wallet.",
-    "SIGN_FAILED",
-  );
+  return null;
 }
 
 export async function disconnectWallet(): Promise<void> {
   const injected = getActiveWalletProvider();
-  if (!injected) return;
 
-  try {
-    await injected.request({
-      method: "wallet_revokePermissions",
-      params: [{ eth_accounts: {} }],
-    });
-  } catch {
-    // Some wallets do not support revoke — local disconnect still clears UI state.
+  if (injected) {
+    try {
+      await injected.request({
+        method: "wallet_revokePermissions",
+        params: [{ eth_accounts: {} }],
+      });
+    } catch {
+      // Revoke is optional — manualDisconnect prevents silent re-connect.
+    }
   }
+
+  setManualDisconnect(true);
+  clearActiveWallet();
 }
 
 export async function readWalletChainId(): Promise<number | null> {
