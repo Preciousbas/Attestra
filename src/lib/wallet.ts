@@ -7,6 +7,7 @@ import {
 import {
   clearActiveWallet,
   ensureActiveWallet,
+  getActiveWallet,
   getActiveWalletProvider,
   requestWalletAccounts,
   setManualDisconnect,
@@ -24,7 +25,37 @@ declare global {
   }
 }
 
-export { WalletError } from "./wallet-ui.ts";
+function debugLog(
+  location: string,
+  message: string,
+  data: Record<string, unknown>,
+  hypothesisId: string,
+  runId = "pre-fix",
+): void {
+  // #region agent log
+  fetch("http://127.0.0.1:7673/ingest/9b6e0f60-6b41-494f-b3f7-f5fa33dde9ce", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "a08580" },
+    body: JSON.stringify({
+      sessionId: "a08580",
+      runId,
+      hypothesisId,
+      location,
+      message,
+      data,
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
+}
+
+function errorDetails(error: unknown): { code?: number; message: string } {
+  const err = error as { code?: number; message?: string; info?: { error?: { code?: number; message?: string } } };
+  return {
+    code: err.code ?? err.info?.error?.code,
+    message: err.message ?? err.info?.error?.message ?? String(error),
+  };
+}
 
 function getBrowserProvider(): BrowserProvider {
   const injected = getActiveWalletProvider();
@@ -97,25 +128,54 @@ export async function switchToGalileo(): Promise<void> {
 export async function signAttestRequest(
   payload: AttestRequestPayload,
   chainId: number,
+  walletId?: string,
 ): Promise<string> {
-  await ensureActiveWallet();
-  const injected = getActiveWalletProvider();
+  const injected = await ensureActiveWallet(walletId);
+  const active = getActiveWallet();
+  debugLog(
+    "wallet.ts:signAttestRequest:entry",
+    "sign start",
+    {
+      walletId: walletId ?? null,
+      activeWalletId: active?.id ?? null,
+      activeWalletName: active?.name ?? null,
+      hasProvider: Boolean(injected),
+      recipient: payload.recipient,
+      signChainId: chainId,
+    },
+    "H2-H3",
+  );
+
   if (!injected) {
-    throw new WalletError("No wallet found", "NO_WALLET");
+    throw new WalletError(
+      "Choose your wallet again (Connect wallet), then retry.",
+      "NO_WALLET",
+    );
   }
 
-  const provider = getBrowserProvider();
-  const network = await provider.getNetwork();
-  const networkChainId = Number(network.chainId);
-  const signer = await provider.getSigner();
-  const signerAddress = await signer.getAddress();
+  const accounts = await requestWalletAccounts(injected);
+  const signerAddress = accounts[0].toLowerCase();
+  debugLog(
+    "wallet.ts:signAttestRequest:accounts",
+    "accounts authorized",
+    {
+      signerAddress,
+      recipient: payload.recipient.toLowerCase(),
+      match: signerAddress === payload.recipient.toLowerCase(),
+    },
+    "H4",
+  );
 
-  if (signerAddress.toLowerCase() !== payload.recipient.toLowerCase()) {
+  if (signerAddress !== payload.recipient.toLowerCase()) {
     throw new WalletError(
       "Your wallet account changed. Disconnect and connect again.",
       "ACCOUNT_MISMATCH",
     );
   }
+
+  const provider = new BrowserProvider(injected as Eip1193Provider);
+  const network = await provider.getNetwork();
+  const networkChainId = Number(network.chainId);
 
   if (networkChainId !== OG_GALILEO_CHAIN.chainId) {
     throw new WalletError(
@@ -132,16 +192,36 @@ export async function signAttestRequest(
     issuedAt: payload.issuedAt,
   };
 
+  const signer = await provider.getSigner(signerAddress);
+
   let v4Error: unknown;
   try {
-    return await signTypedDataV4(injected, signerAddress, typed.domain, typed.types, signMessage);
+    const sig = await signTypedDataV4(injected, signerAddress, typed.domain, typed.types, signMessage);
+    debugLog("wallet.ts:signAttestRequest:success", "v4 signed", { method: "v4" }, "H1", "post-fix");
+    return sig;
   } catch (error) {
     v4Error = error;
+    const details = errorDetails(error);
+    debugLog(
+      "wallet.ts:signAttestRequest:v4-fail",
+      "v4 failed",
+      { code: details.code, message: details.message },
+      "H1",
+    );
   }
 
   try {
-    return await signer.signTypedData(typed.domain, typed.types, signMessage);
+    const sig = await signer.signTypedData(typed.domain, typed.types, signMessage);
+    debugLog("wallet.ts:signAttestRequest:success", "ethers signed", { method: "ethers" }, "H5", "post-fix");
+    return sig;
   } catch (ethersError) {
+    const details = errorDetails(ethersError);
+    debugLog(
+      "wallet.ts:signAttestRequest:ethers-fail",
+      "ethers failed",
+      { code: details.code, message: details.message },
+      "H5",
+    );
     throw mapSignError(v4Error, ethersError);
   }
 }
@@ -204,8 +284,24 @@ function mapSingleSignError(error: unknown): WalletError | null {
   const code = err.code ?? err.info?.error?.code;
   const rawMessage = err.message?.trim() ?? "";
 
-  if (code === 4001 || String(code) === "ACTION_REJECTED") {
+  if (code === 4001 || code === 4100 || String(code) === "ACTION_REJECTED") {
+    if (code === 4100) {
+      return new WalletError(
+        "Your wallet blocked the signature. In Brave, pick MetaMask in the wallet list (not Browser wallet). In brave://settings/web3 set Default wallet to Extensions, then reconnect.",
+        "SIGN_UNAUTHORIZED",
+      );
+    }
     return new WalletError("You declined the signature in your wallet.", "SIGN_REJECTED");
+  }
+
+  if (
+    rawMessage.includes("not been authorized") ||
+    rawMessage.includes("not authorized")
+  ) {
+    return new WalletError(
+      "Your wallet blocked the signature. Reconnect using the same wallet you picked in the connect modal, then try again.",
+      "SIGN_UNAUTHORIZED",
+    );
   }
 
   if (

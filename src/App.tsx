@@ -63,6 +63,7 @@ export default function App() {
               issuedAt,
             },
             signChainId,
+            wallet.selectedWalletId || undefined,
           );
 
           const response = await generateSignal({
