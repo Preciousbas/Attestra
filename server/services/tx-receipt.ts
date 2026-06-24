@@ -1,7 +1,7 @@
 import type { JsonRpcProvider, TransactionReceipt, TransactionResponse } from "ethers";
 
 const DEFAULT_CONFIRMATIONS = 1;
-const DEFAULT_TIMEOUT_MS = 120_000;
+const DEFAULT_TIMEOUT_MS = process.env.NETLIFY ? 25_000 : 120_000;
 const POLL_INTERVAL_MS = 2_000;
 
 /**
