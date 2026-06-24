@@ -1,0 +1,20 @@
+node_modules
+dist
+.env
+.env.local
+.env.*.local
+.env.netlify
+.env.production
+*.log
+.DS_Store
+cache
+artifacts/hardhat
+coverage
+coverage.json
+.cursor
+.netlify
+
+# Foundry
+out
+broadcast
+cache/solidity-files-cache.json

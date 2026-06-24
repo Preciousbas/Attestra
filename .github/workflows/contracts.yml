@@ -1,0 +1,53 @@
+name: Contracts
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "contracts/**"
+      - "test/foundry/**"
+      - "script/**"
+      - "foundry.toml"
+      - "remappings.txt"
+      - "lib/**"
+      - ".github/workflows/contracts.yml"
+  pull_request:
+    paths:
+      - "contracts/**"
+      - "test/foundry/**"
+      - "script/**"
+      - "foundry.toml"
+      - "remappings.txt"
+      - "lib/**"
+      - ".github/workflows/contracts.yml"
+
+jobs:
+  forge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Format check
+        run: forge fmt --check
+
+      - name: Build
+        run: forge build
+
+      - name: Unit + fuzz + security tests
+        run: forge test -vv --match-path test/foundry/SignalRegistry.t.sol
+
+      - name: Invariant tests (CI profile)
+        run: FOUNDRY_PROFILE=ci forge test -vv --match-path test/foundry/SignalRegistry.invariant.t.sol
+
+      - name: Coverage on SignalRegistry.sol
+        run: |
+          FOUNDRY_PROFILE=coverage forge coverage \
+            --match-path test/foundry/SignalRegistry.t.sol \
+            --report summary \
+            | tee coverage-summary.txt
+          grep -q "contracts/SignalRegistry.sol.*100.00%" coverage-summary.txt

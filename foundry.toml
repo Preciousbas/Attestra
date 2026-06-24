@@ -1,0 +1,36 @@
+[profile.default]
+src = "contracts"
+test = "test/foundry"
+script = "script"
+out = "out"
+libs = ["lib"]
+solc_version = "0.8.24"
+evm_version = "cancun"
+optimizer = true
+optimizer_runs = 200
+ffi = false
+fs_permissions = [{ access = "read", path = "./" }]
+
+# Faster CI runs — full invariant suite remains default locally.
+[profile.ci]
+fuzz = { runs = 128 }
+invariant = { runs = 64, depth = 128 }
+
+# Unit tests only — pair with `forge coverage --match-path test/foundry/SignalRegistry.t.sol`
+[profile.coverage]
+optimizer = false
+
+[fmt]
+line_length = 100
+tab_width = 4
+bracket_spacing = false
+int_types = "long"
+quote_style = "double"
+number_underscore = "thousands"
+
+[rpc_endpoints]
+og_testnet = "https://evmrpc-testnet.0g.ai"
+og_mainnet = "https://evmrpc.0g.ai"
+
+[etherscan]
+og_testnet = { key = "${ETHERSCAN_API_KEY}", url = "https://chainscan-galileo.0g.ai/api", chain = 16602 }
