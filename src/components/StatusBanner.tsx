@@ -11,6 +11,13 @@ interface StatusBannerProps {
   error: string | null;
 }
 
+function isLocalDev(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
+  );
+}
+
 export function StatusBanner({
   apiOk,
   computeReady,
@@ -24,12 +31,27 @@ export function StatusBanner({
     return <div className={`${styles.banner} ${styles.error}`}>{error}</div>;
   }
 
-  if (apiOk === null) return null;
+  if (apiOk === null) {
+    return (
+      <div className={`${styles.banner} ${styles.warn}`}>
+        Checking API…
+      </div>
+    );
+  }
 
   if (!apiOk) {
     return (
       <div className={`${styles.banner} ${styles.warn}`}>
-        API offline — run <code className="mono">npm run dev</code> from the project root.
+        {isLocalDev() ? (
+          <>
+            API offline — run <code className="mono">npm run dev</code> from the project root.
+          </>
+        ) : (
+          <>
+            API unreachable. Check <code className="mono">/api/health</code> on this site and
+            confirm Netlify functions are deployed.
+          </>
+        )}
       </div>
     );
   }
@@ -54,9 +76,19 @@ export function StatusBanner({
   if (!computeReady) {
     return (
       <div className={`${styles.banner} ${styles.warn}`}>
-        Add <code className="mono">ZG_COMPUTE_API_KEY</code> to <code className="mono">.env</code>{" "}
-        (from <a href="https://pc.0g.ai" target="_blank" rel="noreferrer">pc.0g.ai</a>) to generate
-        signals.
+        {isLocalDev() ? (
+          <>
+            Add <code className="mono">ZG_COMPUTE_API_KEY</code> to <code className="mono">.env</code>{" "}
+            (from <a href="https://pc.0g.ai" target="_blank" rel="noreferrer">pc.0g.ai</a>) to
+            generate signals.
+          </>
+        ) : (
+          <>
+            Set <code className="mono">ZG_COMPUTE_API_KEY</code> in your Netlify environment
+            variables (from <a href="https://pc.0g.ai" target="_blank" rel="noreferrer">pc.0g.ai</a>
+            ), then redeploy.
+          </>
+        )}
       </div>
     );
   }

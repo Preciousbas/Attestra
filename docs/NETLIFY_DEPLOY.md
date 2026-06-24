@@ -27,9 +27,7 @@ npx netlify env:import .env
 
 **Required:** `ZG_COMPUTE_API_KEY`, `ZG_PRIVATE_KEY`, `ZG_REGISTRY_ADDRESS`, `ZG_AGENTIC_ID_ADDRESS`
 
-**Never set:** `ATTEST_SKIP_WALLET_AUTH`
-
-`VITE_API_URL=/api` is already set in `netlify.toml` at build time.
+**Do not set on Netlify:** `PORT`, `VITE_API_URL` (use `netlify.toml` — already `/api`), `ATTEST_SKIP_WALLET_AUTH`
 
 ## 4. Deploy
 

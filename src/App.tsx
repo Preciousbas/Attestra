@@ -91,6 +91,7 @@ export default function App() {
   );
 
   const canSubmit =
+    apiOk === true &&
     !loading &&
     (!requireWalletForMint || (Boolean(wallet.address) && wallet.isGalileo));
 
