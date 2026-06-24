@@ -32,11 +32,7 @@ export function StatusBanner({
   }
 
   if (apiOk === null) {
-    return (
-      <div className={`${styles.banner} ${styles.warn}`}>
-        Checking API…
-      </div>
-    );
+    return null;
   }
 
   if (!apiOk) {

@@ -95,38 +95,127 @@ export async function signAttestRequest(
   chainId: number,
 ): Promise<string> {
   await ensureActiveWallet();
+  const injected = getActiveWalletProvider();
+  if (!injected) {
+    throw new WalletError("No wallet found", "NO_WALLET");
+  }
+
   const provider = getBrowserProvider();
   const network = await provider.getNetwork();
   const networkChainId = Number(network.chainId);
   const signer = await provider.getSigner();
   const signerAddress = await signer.getAddress();
+
+  if (signerAddress.toLowerCase() !== payload.recipient.toLowerCase()) {
+    throw new WalletError(
+      "Your wallet account changed. Disconnect and connect again.",
+      "ACCOUNT_MISMATCH",
+    );
+  }
+
+  if (networkChainId !== OG_GALILEO_CHAIN.chainId) {
+    throw new WalletError(
+      "Switch to 0G Galileo testnet in your wallet, then try again.",
+      "WRONG_NETWORK",
+    );
+  }
+
   const typed = buildAttestTypedData(chainId, payload);
+  const signMessage = {
+    thesis: payload.thesis,
+    symbol: payload.symbol,
+    recipient: payload.recipient,
+    issuedAt: payload.issuedAt,
+  };
 
   try {
-    return await signer.signTypedData(typed.domain, typed.types, typed.message);
-  } catch (error) {
-    const err = error as { code?: number; message?: string; info?: { error?: { code?: number } } };
-    const code = err.code ?? err.info?.error?.code;
+    return await signer.signTypedData(typed.domain, typed.types, signMessage);
+  } catch (primaryError) {
+    try {
+      return await signTypedDataV4(injected, signerAddress, typed.domain, typed.types, signMessage);
+    } catch {
+      throw mapSignError(primaryError);
+    }
+  }
+}
 
-    if (code === 4001 || String(code) === "ACTION_REJECTED") {
-      throw new WalletError("You declined the signature in your wallet.", "SIGN_REJECTED");
-    }
-    if (networkChainId !== OG_GALILEO_CHAIN.chainId) {
-      throw new WalletError(
-        "Switch to 0G Galileo testnet in your wallet, then try again.",
-        "WRONG_NETWORK",
-      );
-    }
-    if (signerAddress.toLowerCase() !== payload.recipient.toLowerCase()) {
-      throw new WalletError(
-        "Your wallet account changed. Disconnect and connect again.",
-        "ACCOUNT_MISMATCH",
-      );
-    }
-    throw new WalletError(
-      "Could not sign in your wallet. Try again or use a different wallet.",
-      "SIGN_FAILED",
-    );
+async function signTypedDataV4(
+  provider: Eip1193Provider,
+  address: string,
+  domain: ReturnType<typeof buildAttestTypedData>["domain"],
+  types: ReturnType<typeof buildAttestTypedData>["types"],
+  message: {
+    thesis: string;
+    symbol: string;
+    recipient: string;
+    issuedAt: number;
+  },
+): Promise<string> {
+  const data = {
+    types: {
+      EIP712Domain: [
+        { name: "name", type: "string" },
+        { name: "version", type: "string" },
+        { name: "chainId", type: "uint256" },
+      ],
+      ...types,
+    },
+    primaryType: "AttestRequest",
+    domain: {
+      name: domain.name,
+      version: domain.version,
+      chainId: domain.chainId,
+    },
+    message: {
+      ...message,
+      issuedAt: String(message.issuedAt),
+    },
+  };
+
+  return (await provider.request({
+    method: "eth_signTypedData_v4",
+    params: [address, JSON.stringify(data)],
+  })) as string;
+}
+
+function mapSignError(error: unknown): WalletError {
+  const err = error as { code?: number; message?: string; info?: { error?: { code?: number } } };
+  const code = err.code ?? err.info?.error?.code;
+  const rawMessage = err.message?.trim() ?? "";
+
+  if (code === 4001 || String(code) === "ACTION_REJECTED") {
+    return new WalletError("You declined the signature in your wallet.", "SIGN_REJECTED");
+  }
+
+  if (
+    rawMessage.includes("User denied") ||
+    rawMessage.includes("user rejected") ||
+    rawMessage.includes("rejected")
+  ) {
+    return new WalletError("You declined the signature in your wallet.", "SIGN_REJECTED");
+  }
+
+  if (rawMessage.length > 0 && rawMessage.length < 160) {
+    return new WalletError(rawMessage, "SIGN_FAILED");
+  }
+
+  return new WalletError(
+    "Could not sign in your wallet. Try again or use a different wallet.",
+    "SIGN_FAILED",
+  );
+}
+
+export async function disconnectWallet(): Promise<void> {
+  const injected = getActiveWalletProvider();
+  if (!injected) return;
+
+  try {
+    await injected.request({
+      method: "wallet_revokePermissions",
+      params: [{ eth_accounts: {} }],
+    });
+  } catch {
+    // Some wallets do not support revoke — local disconnect still clears UI state.
   }
 }
 

@@ -10,8 +10,10 @@ export function WalletButton() {
     hasProvider,
     wallets,
     connecting,
+    disconnecting,
     error,
     connect,
+    disconnect,
     switchNetwork,
     shorten,
     clearError,
@@ -86,16 +88,33 @@ export function WalletButton() {
 
   return (
     <div className={styles.wrap}>
-      <div className={styles.connected}>
+      <div className={styles.connectedPill}>
         <span className={`${styles.network} ${isGalileo ? styles.networkOk : styles.networkWarn}`}>
           {isGalileo ? "0G Galileo" : "Wrong network"}
         </span>
         <span className={styles.address}>{shorten(address)}</span>
+        <button
+          type="button"
+          className={styles.disconnect}
+          onClick={() => void disconnect()}
+          disabled={disconnecting}
+          title="Disconnect wallet"
+        >
+          {disconnecting ? "…" : "Disconnect"}
+        </button>
       </div>
       {!isGalileo && (
         <button type="button" className={styles.switch} onClick={() => void switchNetwork()}>
           Switch network
         </button>
+      )}
+      {error && (
+        <p className={styles.error} role="alert">
+          {error}
+          <button type="button" className={styles.dismiss} onClick={clearError}>
+            ×
+          </button>
+        </p>
       )}
     </div>
   );

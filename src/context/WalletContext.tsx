@@ -27,9 +27,11 @@ interface WalletContextValue {
   wallets: DiscoveredWallet[];
   selectedWalletId: string;
   connecting: boolean;
+  disconnecting: boolean;
   error: string | null;
   setSelectedWalletId: (id: string) => void;
   connect: (walletId?: string) => Promise<void>;
+  disconnect: () => Promise<void>;
   switchNetwork: () => Promise<void>;
   clearError: () => void;
   shorten: (address: string) => string;
@@ -68,6 +70,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [address, setAddress] = useState<string | null>(null);
   const [chainId, setChainId] = useState<number | null>(null);
   const [connecting, setConnecting] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [wallets, setWallets] = useState<DiscoveredWallet[]>([]);
   const [selectedWalletId, setSelectedWalletId] = useState("");
@@ -166,6 +169,21 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     }
   }, [selectedWalletId]);
 
+  const disconnect = useCallback(async () => {
+    setDisconnecting(true);
+    setError(null);
+    try {
+      const { disconnectWallet } = await loadWallet();
+      await disconnectWallet();
+    } catch {
+      // Local state reset is enough if revoke is unsupported.
+    } finally {
+      setAddress(null);
+      setChainId(null);
+      setDisconnecting(false);
+    }
+  }, []);
+
   const switchNetwork = useCallback(async () => {
     setError(null);
     try {
@@ -188,9 +206,11 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       wallets,
       selectedWalletId,
       connecting,
+      disconnecting,
       error,
       setSelectedWalletId,
       connect,
+      disconnect,
       switchNetwork,
       clearError: () => setError(null),
       shorten: shortenAddress,
@@ -202,8 +222,10 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       wallets,
       selectedWalletId,
       connecting,
+      disconnecting,
       error,
       connect,
+      disconnect,
       switchNetwork,
     ],
   );
