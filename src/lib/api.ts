@@ -51,29 +51,7 @@ async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
 }
 
 export async function fetchHealth(): Promise<HealthResponse> {
-  const url = `${API_BASE}/health`;
   const res = await apiFetch("/health");
-  // #region agent log
-  fetch("http://127.0.0.1:7673/ingest/9b6e0f60-6b41-494f-b3f7-f5fa33dde9ce", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "a08580" },
-    body: JSON.stringify({
-      sessionId: "a08580",
-      runId: "post-fix",
-      hypothesisId: "H1-H2",
-      location: "api.ts:fetchHealth",
-      message: "health fetch response",
-      data: {
-        url,
-        apiBase: API_BASE,
-        status: res.status,
-        ok: res.ok,
-        contentType: res.headers.get("content-type"),
-      },
-      timestamp: Date.now(),
-    }),
-  }).catch(() => {});
-  // #endregion
   if (!res.ok) throw new Error("API unreachable");
   return readApiJson<HealthResponse>(res);
 }
