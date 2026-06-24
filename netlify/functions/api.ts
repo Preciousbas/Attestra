@@ -1,5 +1,5 @@
 import type { Config, Context } from "@netlify/functions";
-import { config } from "../../server/config.ts";
+import { config as appConfig } from "../../server/config.ts";
 import { assertComputeConfigured } from "../../server/config.ts";
 import { parseGenerateBody, resolveMintRecipient } from "../../server/services/generate-request.ts";
 import { generateSignal } from "../../server/services/signal.ts";
@@ -32,15 +32,15 @@ async function enrichProof(proof: OnChainProof) {
         tokenId: agenticData.tokenId,
         dataHash: agenticData.dataHash,
         dataDescription: agenticData.dataDescription,
-        contractAddress: config.chain.agenticIdAddress,
+        contractAddress: appConfig.chain.agenticIdAddress,
         explorerTokenUrl: getExplorerNftUrl(
-          config.chain.agenticIdAddress,
+          appConfig.chain.agenticIdAddress,
           agenticData.tokenId,
         ),
         hashMatch:
           agenticData.dataHash.toLowerCase() === proof.contentHash.toLowerCase(),
         ownerAddress: agenticData.ownerAddress,
-        transferMode: config.chain.agenticTransferMode,
+        transferMode: appConfig.chain.agenticTransferMode,
       }
     : undefined;
 
@@ -60,11 +60,11 @@ export default async (req: Request, _context: Context): Promise<Response> => {
       return json({
         ok: true,
         service: "attestra-api",
-        computeConfigured: Boolean(config.compute.apiKey),
-        chainId: config.chain.chainId,
+        computeConfigured: Boolean(appConfig.compute.apiKey),
+        chainId: appConfig.chain.chainId,
         agenticConfigured: isAgenticConfigured(),
-        agenticTransferMode: config.chain.agenticTransferMode,
-        requireWalletForMint: isAgenticConfigured() && !config.allowUnsignedMint,
+        agenticTransferMode: appConfig.chain.agenticTransferMode,
+        requireWalletForMint: isAgenticConfigured() && !appConfig.allowUnsignedMint,
       });
     }
 
@@ -84,7 +84,7 @@ export default async (req: Request, _context: Context): Promise<Response> => {
 
       assertComputeConfigured();
       const mint = resolveMintRecipient(body, { thesis, symbol });
-      const result = await generateSignal(thesis, symbol ?? config.defaultSymbol, {
+      const result = await generateSignal(thesis, symbol ?? appConfig.defaultSymbol, {
         ownerAddress: mint.ownerAddress,
       });
       return json(result);
