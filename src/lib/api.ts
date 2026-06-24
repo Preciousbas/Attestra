@@ -60,6 +60,21 @@ async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
   });
 }
 
+function isLocalDevHost(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
+  );
+}
+
+/** Local Express handles generate synchronously; Netlify uses a 15-minute background function. */
+function generateEndpoint(): string {
+  if (isLocalDevHost()) {
+    return `${API_BASE}/signals/generate`;
+  }
+  return "/.netlify/functions/signals-generate-background";
+}
+
 async function pollSignalJob(jobId: string): Promise<GenerateSignalResponse> {
   const deadline = Date.now() + JOB_TIMEOUT_MS;
 
@@ -117,9 +132,12 @@ export async function generateSignal(
     body.signature = params.signature;
   }
 
-  const res = await apiFetch("/signals/generate", {
+  const res = await fetch(generateEndpoint(), {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
     body: JSON.stringify(body),
   });
 
